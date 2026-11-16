@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
+          # no third-party modules, so there's no go.sum to cache
+          cache: false
       - run: go vet ./...
       - run: go test ./... -race -coverprofile=coverage.out
       - run: go tool cover -func=coverage.out
