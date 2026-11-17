@@ -18,30 +18,58 @@ calculator-exercise/
 └── Dockerfile          builds both and serves them from one container
 ```
 
-## Running it
+## Setup
 
-**Requirements:** Go 1.22+ and Node 20+ (Docker optional).
-
-### Local development
-
-Two terminals:
+**Requirements:** Go 1.22+, Node 20+ and npm. Docker is optional.
 
 ```bash
-# API on :8080
+git clone https://github.com/Angel877898/Calculator-exercise.git
+cd Calculator-exercise
+
+# backend has no third-party deps, this only checks it builds
+cd backend && go build ./... && cd ..
+
+# frontend deps
+cd frontend && npm install && cd ..
+```
+
+## Running the backend
+
+```bash
 cd backend
 go run ./cmd/server
 ```
 
+The API listens on http://localhost:8080. Quick check:
+
 ```bash
-# UI on :5173, /api is proxied to :8080
+curl localhost:8080/healthz
+# {"status":"ok"}
+```
+
+To build a binary instead: `go build -o bin/server ./cmd/server` and run `./bin/server`.
+
+## Running the frontend
+
+With the backend running, in a second terminal:
+
+```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Open http://localhost:5173.
+Open http://localhost:5173. Vite proxies `/api` to `localhost:8080`, so no CORS setup is needed in development.
 
-### Docker
+Production build:
+
+```bash
+npm run build      # outputs frontend/dist
+npm run preview    # serves the build locally
+```
+
+If the UI is hosted on a different origin than the API, build it with `VITE_API_URL=https://api.example.com` and start the backend with `ALLOWED_ORIGIN` set to the UI's origin.
+
+## Running both with Docker
 
 ```bash
 docker build -t calculator .
@@ -50,7 +78,7 @@ docker run --rm -p 8080:8080 calculator
 
 Open http://localhost:8080. The Go binary serves the built frontend and the API on the same port, so there's no CORS to deal with.
 
-### Configuration
+## Configuration
 
 | Variable         | Default | Description                                            |
 | ---------------- | ------- | ------------------------------------------------------ |
@@ -91,6 +119,32 @@ curl -s localhost:8080/api/v1/calculate \
 { "operation": "divide", "operands": [10, 4], "result": 2.5 }
 ```
 
+More examples:
+
+```bash
+# square root, one operand
+curl -s localhost:8080/api/v1/calculate -H 'Content-Type: application/json' \
+  -d '{"operation":"sqrt","operands":[144]}'
+# {"operation":"sqrt","operands":[144],"result":12}
+
+# power
+curl -s localhost:8080/api/v1/calculate -H 'Content-Type: application/json' \
+  -d '{"operation":"power","operands":[2,8]}'
+# {"operation":"power","operands":[2,8],"result":256}
+
+# 15% of 200
+curl -s localhost:8080/api/v1/calculate -H 'Content-Type: application/json' \
+  -d '{"operation":"percentage","operands":[15,200]}'
+# {"operation":"percentage","operands":[15,200],"result":30}
+```
+
+On Windows PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/calculate `
+  -ContentType 'application/json' -Body '{"operation":"multiply","operands":[6,7]}'
+```
+
 **Errors** always look like this:
 
 ```bash
@@ -112,6 +166,18 @@ curl -s localhost:8080/api/v1/calculate \
 | 422    | `division_by_zero`      | Divisor is 0                                       |
 | 422    | `negative_sqrt`         | `sqrt` of a negative number                        |
 | 422    | `out_of_range`          | Result overflows or isn't a real number (e.g. `(-8)^0.5`) |
+
+A couple more:
+
+```bash
+curl -s localhost:8080/api/v1/calculate -H 'Content-Type: application/json' \
+  -d '{"operation":"sqrt","operands":[-9]}'
+# 422 {"error":{"code":"negative_sqrt","message":"square root of a negative number"}}
+
+curl -s localhost:8080/api/v1/calculate -H 'Content-Type: application/json' \
+  -d '{"operation":"add","operands":[1]}'
+# 400 {"error":{"code":"invalid_operand_count","message":"wrong number of operands: add expects 2, got 1"}}
+```
 
 400 means the request itself is wrong; 422 means it's well formed but the math has no valid answer. The `code` field is stable so clients can branch on it, the `message` is for humans.
 
@@ -173,6 +239,15 @@ CI runs all of this on every push and PR (`.github/workflows/ci.yml`).
 **Percentage** works like a desk calculator: `200 + 10 %` turns `10` into `20` (10% of 200), then `=` gives `220`. With no pending operation, `%` divides by 100.
 
 **UX details.** Keyboard support (`0-9 . + - * / ^ Enter Backspace Esc %`, `r` for √), operator highlight, running expression above the result, history you can click to reuse a result, font that shrinks for long numbers, light/dark following the OS, and a single-column layout on phones.
+
+## Assumptions
+
+- It's a calculator app, not an expression evaluator: one operation per request, evaluated left to right as you press keys (`2 + 3 × 4` gives `20`, like a basic desk calculator).
+- Numbers are IEEE-754 doubles on both sides. The API doesn't round; `0.1 + 0.2` returns `0.30000000000000004` and the UI displays `0.3`.
+- `percentage(a, b)` means "a percent of b". A single-operand percent (`50%` → `0.5`) is the same call with `b = 1`.
+- Input is capped at 16 digits in the UI, which is about the precision a double can hold.
+- No auth, persistence or rate limiting: the service is stateless and meant to run behind something else if exposed publicly.
+- History lives in memory in the browser and is cleared on reload.
 
 ## Possible improvements
 
